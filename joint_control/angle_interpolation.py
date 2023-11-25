@@ -44,8 +44,6 @@ class AngleInterpolationAgent(PIDAgent):
         target_joints = self.angle_interpolation(self.keyframes, perception)
         if 'LHipYawPitch' in target_joints:
             target_joints['RHipYawPitch'] = target_joints['LHipYawPitch']
-        else:
-            print("'LHipYawPitch' not found in target_joints; assigning a default value or skipping.")
         self.target_joints.update(target_joints)
         return super(AngleInterpolationAgent, self).think(perception)
 
