@@ -135,7 +135,6 @@ class ForwardKinematicsAgent(PostureRecognitionAgent):
         '''forward kinematics
         :param joints: {joint_name: joint_angle}
         '''
-        print(joints)
         for chain_joints in self.chains.values():
             T = identity(4)
             for joint in chain_joints:
