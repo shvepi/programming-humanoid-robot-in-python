@@ -12,8 +12,7 @@
 from forward_kinematics import ForwardKinematicsAgent
 from numpy.matlib import identity
 import numpy as np
-from autograd import grad
-import autograd.numpy as anp
+
 
 class InverseKinematicsAgent(ForwardKinematicsAgent):
 
@@ -21,25 +20,52 @@ class InverseKinematicsAgent(ForwardKinematicsAgent):
         # Extract translation components
         x, y, z = T[0, 3], T[1, 3], T[2, 3]
 
-        # Extract the rotation angle
-        if T[0, 0] != 1:  # Rotation is not around the X-axis
-            angle = np.arctan2(T[2, 1], T[2, 2])
-        elif T[1, 1] != 1:  # Rotation is not around the Y-axis
-            angle = np.arctan2(T[0, 2], T[0, 0])
-        elif T[2, 2] != 1:  # Rotation is not around the Z-axis
-            angle = np.arctan2(T[1, 0], T[1, 1])
-        else:
-            angle = 0  # No rotation
+        # Extract rotation matrix
+        R = T[:3, :3]
 
-        return x, y, z, angle
+        # Compute Euler angles from rotation matrix
+        sy = np.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
+
+        singular = sy < 1e-6
+        if not singular:
+            x_angle = np.arctan2(R[2, 1], R[2, 2])
+            y_angle = np.arctan2(-R[2, 0], sy)
+            z_angle = np.arctan2(R[1, 0], R[0, 0])
+        else:
+            x_angle = np.arctan2(-R[1, 2], R[1, 1])
+            y_angle = np.arctan2(-R[2, 0], sy)
+            z_angle = 0
+
+        # Return translation and rotation (in Euler angles)
+        return [x, y, z, x_angle, y_angle, z_angle]
 
     def inverse_kinematics(self, effector_name, transform):
         # Initialize joint angles for the specified chain
-        joint_limits = [-np.pi / 2, np.pi / 2]
-        joint_angles = np.random.uniform(joint_limits[0], joint_limits[1], len(self.chains[effector_name]))
+        # Define joint limits for all of NAO's joints
+        joint_limits = {
+            'HeadYaw': [-2.0857, 2.0857], 'HeadPitch': [-0.6720, 0.5149],
+            'LShoulderPitch': [-2.0857, 2.0857], 'LShoulderRoll': [-1.3265, 0.3142],
+            'LElbowYaw': [-2.0857, 2.0857], 'LElbowRoll': [0.0349, 1.5446],
+            'RShoulderPitch': [-2.0857, 2.0857], 'RShoulderRoll': [-1.3265, 0.3142],
+            'RElbowYaw': [-2.0857, 2.0857], 'RElbowRoll': [-0.0349, 1.5446],
+            'LHipYawPitch': [-1.145303, 0.740810], 'LHipRoll': [-0.379472, 0.790477],
+            'LHipPitch': [-1.773912, 0.484090], 'LKneePitch': [-0.092346, 2.112528],
+            'LAnklePitch': [-1.189516, 0.922747], 'LAnkleRoll': [-0.397880, 0.769001],
+            'RHipYawPitch': [-1.145303, 0.740810], 'RHipRoll': [-0.768992, 0.397880],
+            'RHipPitch': [-1.186448, 0.932056], 'RKneePitch': [-0.103083, 2.120198],
+            'RAnklePitch': [-1.189516, 0.922747], 'RAnkleRoll': [-0.768992, 0.397935]
+        }
+
+        # Initialize joint angles within limits for the specified effector
+        joint_angles = np.array([np.random.uniform(joint_limits[joint][0], joint_limits[joint][1])
+                                 for joint in self.chains[effector_name]])
         lambda_ = 1
         max_step = 0.1
-        target = np.matrix([self.from_trans(transform)]).T
+        # Convert transform to a flat list
+        target_transform = self.from_trans(transform)
+
+        # Create a numpy matrix from the flat list
+        target = np.matrix(target_transform).T
         max_iterations = 1000  # Set a maximum number of iterations to prevent infinite loops
         error_threshold = 1e-4
         for _ in range(max_iterations):
@@ -47,13 +73,15 @@ class InverseKinematicsAgent(ForwardKinematicsAgent):
             Ts = [np.identity(len(self.chains[effector_name]))] + [self.transforms[name] for name in
                                                                    self.chains[effector_name]]
             # Compute the end-effector transformation matrix
-            Te = np.matrix([self.from_trans(Ts[-1])]).T
+            end_effector_trans = self.from_trans(Ts[-1])
+            Te = np.matrix(end_effector_trans).T
             # Calculate the error between the current end-effector position and the target
             error = target - Te
             # Clip the error to be within the specified maximum step size
             np.clip(error, -max_step, max_step, out=error)
             # Create a matrix of transformation parameters for all joints except the last one
-            T = np.matrix([self.from_trans(j) for j in Ts[:-1]]).T
+            joint_transforms = [self.from_trans(j) for j in Ts[:-1]]
+            T = np.matrix(joint_transforms).T
             # Compute the Jacobian matrix as the difference between end-effector and joint transformations
             J = Te - T
             # Shift the first three rows of the Jacobian to align rotation and translation components
